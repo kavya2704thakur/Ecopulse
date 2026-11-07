@@ -8,6 +8,9 @@ import {
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
 import KeypadSimulator from './KeypadSimulator';
 
+// Dynamic API Base URL (Fallback to Render Live Backend)
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://ecopulse-backend-j2sh.onrender.com';
+
 // High-Tech Cyber-Atmosphere Dynamic Background
 function CyberAtmosphereBackground() {
   return (
@@ -139,7 +142,7 @@ function App() {
   // Fetch Live Subscribers Breakdown
   const fetchSubscriberStats = async () => {
     try {
-      const res = await axios.get('http://localhost:8080/api/sms/stats');
+      const res = await axios.get(`${API_BASE_URL}/api/sms/stats`);
       setSubscriberStats({
         total: res.data.totalSubscribers,
         web: res.data.webUsers,
@@ -158,8 +161,8 @@ function App() {
   const fetchAqiData = async (targetCity) => {
     try {
       const [latestRes, historyRes] = await Promise.all([
-        axios.get(`http://localhost:8080/api/air-quality/latest?city=${encodeURIComponent(targetCity)}`),
-        axios.get(`http://localhost:8080/api/air-quality/history?city=${encodeURIComponent(targetCity)}`)
+        axios.get(`${API_BASE_URL}/api/air-quality/latest?city=${encodeURIComponent(targetCity)}`),
+        axios.get(`${API_BASE_URL}/api/air-quality/history?city=${encodeURIComponent(targetCity)}`)
       ]);
 
       setLatestData(latestRes.data);
@@ -481,9 +484,7 @@ function App() {
           </div>
         </header>
 
-        {/* ============================================================== */}
-        {/* NEW: LIVE USER SUBSCRIBER TELEMETRY HUD (PWA vs KEYPAD BREAKDOWN) */}
-        {/* ============================================================== */}
+        {/* LIVE USER SUBSCRIBER TELEMETRY HUD (PWA vs KEYPAD BREAKDOWN) */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           
           {/* Total Registered Subscribers */}
