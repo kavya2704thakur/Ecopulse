@@ -5,7 +5,11 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
+import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 @Service
@@ -18,8 +22,10 @@ public class LiveAirQualityFetchService {
 
     public AirQuality fetchAndSaveLiveCityData(String cityName) {
         try {
-            // 1. City ka Latitude aur Longitude nikaalte hain (Free Geocoding API)
-            String geoUrl = "https://geocoding-api.open-meteo.com/v1/search?name=" + cityName + "&count=1&language=en&format=json";
+            // 1. City encode karke Lat/Lon fetch karte hain
+            String encodedCity = URLEncoder.encode(cityName.trim(), StandardCharsets.UTF_8);
+            String geoUrl = "https://geocoding-api.open-meteo.com/v1/search?name=" + encodedCity + "&count=1&language=en&format=json";
+            
             Map<?, ?> geoResponse = restTemplate.getForObject(geoUrl, Map.class);
 
             if (geoResponse == null || !geoResponse.containsKey("results")) {
@@ -27,7 +33,7 @@ public class LiveAirQualityFetchService {
             }
 
             List<?> results = (List<?>) geoResponse.get("results");
-            if (results.isEmpty()) {
+            if (results == null || results.isEmpty()) {
                 return null;
             }
 
@@ -36,41 +42,83 @@ public class LiveAirQualityFetchService {
             double longitude = ((Number) firstResult.get("longitude")).doubleValue();
             String officialCityName = (String) firstResult.get("name");
 
-            // 2. Real-time live Air Quality & Weather data mangwate hain
+            // 2. Real-time live Air Quality mangwate hain (Locale.US lagaya hai taaki dot decimal use ho)
             String airUrl = String.format(
-                    "https://air-quality-api.open-meteo.com/v1/air-quality?latitude=%f&longitude=%f&current=european_aqi,pm10,pm2_5,carbon_monoxide",
+                    Locale.US,
+                    "https://air-quality-api.open-meteo.com/v1/air-quality?latitude=%.4f&longitude=%.4f&current=european_aqi,pm10,pm2_5,carbon_monoxide",
                     latitude, longitude
             );
             Map<?, ?> airResponse = restTemplate.getForObject(airUrl, Map.class);
-            Map<?, ?> currentAir = (Map<?, ?>) airResponse.get("current");
+            Map<?, ?> currentAir = airResponse != null ? (Map<?, ?>) airResponse.get("current") : null;
 
             // 3. Current Temperature fetch karte hain
             String weatherUrl = String.format(
-                    "https://api.open-meteo.com/v1/forecast?latitude=%f&longitude=%f&current=temperature_2m",
+                    Locale.US,
+                    "https://api.open-meteo.com/v1/forecast?latitude=%.4f&longitude=%.4f&current=temperature_2m",
                     latitude, longitude
             );
             Map<?, ?> weatherResponse = restTemplate.getForObject(weatherUrl, Map.class);
-            Map<?, ?> currentWeather = (Map<?, ?>) weatherResponse.get("current");
+            Map<?, ?> currentWeather = weatherResponse != null ? (Map<?, ?>) weatherResponse.get("current") : null;
 
-            // Values extract karte hain
-            int aqi = currentAir.get("european_aqi") != null ? ((Number) currentAir.get("european_aqi")).intValue() * 2 : 100;
-            double pm25 = currentAir.get("pm2_5") != null ? ((Number) currentAir.get("pm2_5")).doubleValue() : 35.0;
-            double pm10 = currentAir.get("pm10") != null ? ((Number) currentAir.get("pm10")).doubleValue() : 70.0;
-            double co = currentAir.get("carbon_monoxide") != null ? Math.round((((Number) currentAir.get("carbon_monoxide")).doubleValue() / 400.0) * 10.0) / 10.0 : 0.8;
-            double temp = currentWeather.get("temperature_2m") != null ? ((Number) currentWeather.get("temperature_2m")).doubleValue() : 25.0;
+            // Values extract karte hain (safe fallbacks ke sath)
+            int aqi = 110;
+            double pm25 = 45.0;
+            double pm10 = 85.0;
+            double co = 0.9;
+            double temp = 26.0;
 
-            // Database entity banakar save karte hain
+            if (currentAir != null) {
+                if (currentAir.get("european_aqi") != null) {
+                    aqi = Math.max(30, ((Number) currentAir.get("european_aqi")).intValue() * 2);
+                }
+                if (currentAir.get("pm2_5") != null) {
+                    pm25 = ((Number) currentAir.get("pm2_5")).doubleValue();
+                }
+                if (currentAir.get("pm10") != null) {
+                    pm10 = ((Number) currentAir.get("pm10")).doubleValue();
+                }
+                if (currentAir.get("carbon_monoxide") != null) {
+                    co = Math.round((((Number) currentAir.get("carbon_monoxide")).doubleValue() / 400.0) * 10.0) / 10.0;
+                }
+            }
+
+            if (currentWeather != null && currentWeather.get("temperature_2m") != null) {
+                temp = ((Number) currentWeather.get("temperature_2m")).doubleValue();
+            }
+
+            // Categorize Status & Advisory
+            String status;
+            String advisory;
+            if (aqi <= 50) {
+                status = "Good";
+                advisory = "Air quality is satisfactory. Outdoor activities are safe.";
+            } else if (aqi <= 100) {
+                status = "Moderate";
+                advisory = "Air quality is acceptable. Sensitive individuals should consider wearing a mask.";
+            } else if (aqi <= 200) {
+                status = "Poor";
+                advisory = "Air quality is unhealthy for sensitive groups. Reduce strenuous outdoor exertion.";
+            } else {
+                status = "Severe";
+                advisory = "Health alert: Serious risk of respiratory strain. Wear N95 masks and stay indoors.";
+            }
+
+            // Database entity populate karte hain
             AirQuality record = new AirQuality();
-            record.setCity(officialCityName);
+            record.setCity(officialCityName != null ? officialCityName : cityName);
             record.setAqi(aqi);
             record.setPm25(pm25);
             record.setPm10(pm10);
             record.setCo(co);
             record.setTemperature(temp);
+            record.setStatus(status);
+            record.setAdvisory(advisory);
+            record.setRecordedAt(LocalDateTime.now());
 
             return airQualityService.saveRecord(record);
 
         } catch (Exception e) {
+            System.err.println("Error fetching live air quality for city: " + cityName + " -> " + e.getMessage());
             e.printStackTrace();
             return null;
         }
