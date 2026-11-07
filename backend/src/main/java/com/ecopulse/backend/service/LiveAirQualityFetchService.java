@@ -1,8 +1,6 @@
 package com.ecopulse.backend.service;
 
 import com.ecopulse.backend.entity.AirQuality;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
@@ -14,6 +12,8 @@ import org.springframework.web.client.RestTemplate;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.Locale;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Service
 public class LiveAirQualityFetchService {
@@ -22,7 +22,6 @@ public class LiveAirQualityFetchService {
     private AirQualityService airQualityService;
 
     private final RestTemplate restTemplate = new RestTemplate();
-    private final ObjectMapper objectMapper = new ObjectMapper();
 
     public AirQuality fetchAndSaveLiveCityData(String cityName) {
         if (cityName == null || cityName.trim().isEmpty()) {
@@ -41,21 +40,23 @@ public class LiveAirQualityFetchService {
             String geoUrl = "https://geocoding-api.open-meteo.com/v1/search?name=" + encodedCity + "&count=1&language=en&format=json";
 
             ResponseEntity<String> geoResponse = restTemplate.exchange(geoUrl, HttpMethod.GET, requestEntity, String.class);
-            JsonNode geoJson = objectMapper.readTree(geoResponse.getBody());
+            String geoBody = geoResponse.getBody() != null ? geoResponse.getBody() : "";
 
             double latitude = 23.2599;
             double longitude = 77.4126;
             String officialCityName = cleanedCity;
 
-            if (geoJson.has("results") && geoJson.get("results").isArray() && geoJson.get("results").size() > 0) {
-                JsonNode first = geoJson.get("results").get(0);
-                if (first.has("latitude") && first.has("longitude")) {
-                    latitude = first.get("latitude").asDouble();
-                    longitude = first.get("longitude").asDouble();
-                }
-                if (first.has("name")) {
-                    officialCityName = first.get("name").asText();
-                }
+            // Extract lat & lon using Regex (No Jackson needed)
+            Matcher latMatcher = Pattern.compile("\"latitude\"\\s*:\\s*([0-9.-]+)").matcher(geoBody);
+            Matcher lonMatcher = Pattern.compile("\"longitude\"\\s*:\\s*([0-9.-]+)").matcher(geoBody);
+            Matcher nameMatcher = Pattern.compile("\"name\"\\s*:\\s*\"([^\"]+)\"").matcher(geoBody);
+
+            if (latMatcher.find() && lonMatcher.find()) {
+                latitude = Double.parseDouble(latMatcher.group(1));
+                longitude = Double.parseDouble(lonMatcher.group(1));
+            }
+            if (nameMatcher.find()) {
+                officialCityName = nameMatcher.group(1);
             }
 
             // 2. Air Quality Data Fetch
@@ -66,8 +67,7 @@ public class LiveAirQualityFetchService {
             );
 
             ResponseEntity<String> airResponse = restTemplate.exchange(airUrl, HttpMethod.GET, requestEntity, String.class);
-            JsonNode airJson = objectMapper.readTree(airResponse.getBody());
-            JsonNode currentAir = airJson.get("current");
+            String airBody = airResponse.getBody() != null ? airResponse.getBody() : "";
 
             // 3. Weather Fetch
             String weatherUrl = String.format(
@@ -77,8 +77,7 @@ public class LiveAirQualityFetchService {
             );
 
             ResponseEntity<String> weatherResponse = restTemplate.exchange(weatherUrl, HttpMethod.GET, requestEntity, String.class);
-            JsonNode weatherJson = objectMapper.readTree(weatherResponse.getBody());
-            JsonNode currentWeather = weatherJson.get("current");
+            String weatherBody = weatherResponse.getBody() != null ? weatherResponse.getBody() : "";
 
             // Values parse karte hain
             int aqi = 115;
@@ -87,23 +86,29 @@ public class LiveAirQualityFetchService {
             double co = 0.9;
             double temp = 26.5;
 
-            if (currentAir != null) {
-                if (currentAir.hasNonNull("european_aqi")) {
-                    aqi = Math.max(35, currentAir.get("european_aqi").asInt() * 2);
-                }
-                if (currentAir.hasNonNull("pm2_5")) {
-                    pm25 = currentAir.get("pm2_5").asDouble();
-                }
-                if (currentAir.hasNonNull("pm10")) {
-                    pm10 = currentAir.get("pm10").asDouble();
-                }
-                if (currentAir.hasNonNull("carbon_monoxide")) {
-                    co = Math.round((currentAir.get("carbon_monoxide").asDouble() / 400.0) * 10.0) / 10.0;
-                }
+            Matcher aqiMatcher = Pattern.compile("\"european_aqi\"\\s*:\\s*([0-9.-]+)").matcher(airBody);
+            if (aqiMatcher.find()) {
+                aqi = Math.max(35, (int) Double.parseDouble(aqiMatcher.group(1)) * 2);
             }
 
-            if (currentWeather != null && currentWeather.hasNonNull("temperature_2m")) {
-                temp = currentWeather.get("temperature_2m").asDouble();
+            Matcher pm25Matcher = Pattern.compile("\"pm2_5\"\\s*:\\s*([0-9.-]+)").matcher(airBody);
+            if (pm25Matcher.find()) {
+                pm25 = Double.parseDouble(pm25Matcher.group(1));
+            }
+
+            Matcher pm10Matcher = Pattern.compile("\"pm10\"\\s*:\\s*([0-9.-]+)").matcher(airBody);
+            if (pm10Matcher.find()) {
+                pm10 = Double.parseDouble(pm10Matcher.group(1));
+            }
+
+            Matcher coMatcher = Pattern.compile("\"carbon_monoxide\"\\s*:\\s*([0-9.-]+)").matcher(airBody);
+            if (coMatcher.find()) {
+                co = Math.round((Double.parseDouble(coMatcher.group(1)) / 400.0) * 10.0) / 10.0;
+            }
+
+            Matcher tempMatcher = Pattern.compile("\"temperature_2m\"\\s*:\\s*([0-9.-]+)").matcher(weatherBody);
+            if (tempMatcher.find()) {
+                temp = Double.parseDouble(tempMatcher.group(1));
             }
 
             AirQuality record = new AirQuality(
