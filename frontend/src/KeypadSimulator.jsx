@@ -2,6 +2,9 @@ import React, { useState, useRef } from 'react';
 import axios from 'axios';
 import { Smartphone, Send, Clock, Wifi, BatteryCharging, Radio, Delete, Sparkles } from 'lucide-react';
 
+// Dynamic API Base URL (Render backend fallback)
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://ecopulse-backend-j2sh.onrender.com';
+
 export default function KeypadSimulator() {
   const [phone, setPhone] = useState('9153702574');
   const [command, setCommand] = useState('JOIN BHOPAL ASTHMA');
@@ -38,16 +41,13 @@ export default function KeypadSimulator() {
 
   const handleKeyPress = (numKey) => {
     if (activeInput === 'phone') {
-      // Phone number me direct number type hoga
       setPhone((prev) => prev + numKey);
       return;
     }
 
-    // Command typing (Multi-tap text mode)
     const chars = keyMap[numKey] || [numKey];
 
     if (lastKeyRef.current === numKey) {
-      // Same key repeatedly pressed within 900ms -> cycle through letters
       clearTimeout(keyTimeoutRef.current);
       keyIndexRef.current = (keyIndexRef.current + 1) % chars.length;
       const nextChar = chars[keyIndexRef.current];
@@ -59,7 +59,6 @@ export default function KeypadSimulator() {
         keyIndexRef.current = 0;
       }, 900);
     } else {
-      // New key pressed
       clearTimeout(keyTimeoutRef.current);
       lastKeyRef.current = numKey;
       keyIndexRef.current = 0;
@@ -94,7 +93,7 @@ export default function KeypadSimulator() {
     ]);
 
     try {
-      const res = await axios.post(`http://localhost:8080/api/sms/inbound?from=${phone}&body=${encodeURIComponent(userMsg)}`);
+      const res = await axios.post(`${API_BASE_URL}/api/sms/inbound?from=${phone}&body=${encodeURIComponent(userMsg)}`);
       setMessages((prev) => [
         ...prev,
         { sender: 'EcoPulse Gateway', text: res.data.smsResponse, time: getCurrentTime() }
@@ -102,7 +101,7 @@ export default function KeypadSimulator() {
     } catch (err) {
       setMessages((prev) => [
         ...prev,
-        { sender: 'Network Alert', text: 'Gateway ping failed. Check backend port 8080.', time: getCurrentTime() }
+        { sender: 'Network Alert', text: 'Gateway ping failed. Check backend connection.', time: getCurrentTime() }
       ]);
     } finally {
       setLoading(false);
@@ -112,7 +111,7 @@ export default function KeypadSimulator() {
   const handleTriggerBlast = async () => {
     setLoading(true);
     try {
-      await axios.post('http://localhost:8080/api/sms/trigger-morning-blast');
+      await axios.post(`${API_BASE_URL}/api/sms/trigger-morning-blast`);
       setMessages((prev) => [
         ...prev,
         { 
@@ -170,25 +169,25 @@ export default function KeypadSimulator() {
         <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider mr-1">Presets:</span>
         <button
           onClick={() => setCommand('JOIN INDORE ALLERGY')}
-          className="text-[11px] px-2.5 py-1 bg-slate-950 hover:bg-emerald-950/50 text-emerald-300 border border-emerald-500/30 rounded-lg transition"
+          className="text-[11px] px-2.5 py-1 bg-slate-950 hover:bg-emerald-950/50 text-emerald-300 border border-emerald-500/30 rounded-lg transition cursor-pointer"
         >
           Indore (Allergy)
         </button>
         <button
           onClick={() => setCommand('JOIN DELHI HEART')}
-          className="text-[11px] px-2.5 py-1 bg-slate-950 hover:bg-emerald-950/50 text-emerald-300 border border-emerald-500/30 rounded-lg transition"
+          className="text-[11px] px-2.5 py-1 bg-slate-950 hover:bg-emerald-950/50 text-emerald-300 border border-emerald-500/30 rounded-lg transition cursor-pointer"
         >
           Delhi (Heart)
         </button>
         <button
           onClick={() => setCommand('JOIN BHOPAL ASTHMA')}
-          className="text-[11px] px-2.5 py-1 bg-slate-950 hover:bg-emerald-950/50 text-emerald-300 border border-emerald-500/30 rounded-lg transition"
+          className="text-[11px] px-2.5 py-1 bg-slate-950 hover:bg-emerald-950/50 text-emerald-300 border border-emerald-500/30 rounded-lg transition cursor-pointer"
         >
           Bhopal (Asthma)
         </button>
         <button
           onClick={() => setCommand('STOP')}
-          className="text-[11px] px-2.5 py-1 bg-slate-950 hover:bg-rose-950/50 text-rose-300 border border-rose-500/30 rounded-lg transition"
+          className="text-[11px] px-2.5 py-1 bg-slate-950 hover:bg-rose-950/50 text-rose-300 border border-rose-500/30 rounded-lg transition cursor-pointer"
         >
           STOP
         </button>
@@ -250,12 +249,12 @@ export default function KeypadSimulator() {
           </div>
         </div>
 
-        {/* Input Controls (Both Keypad & Physical Keyboard Allowed) */}
+        {/* Input Controls */}
         <div className="mt-4 space-y-2 text-xs">
           <div className="grid grid-cols-2 gap-2">
             <div 
               onClick={() => setActiveInput('phone')}
-              className={`p-2 rounded-xl border transition ${
+              className={`p-2 rounded-xl border transition cursor-pointer ${
                 activeInput === 'phone' 
                   ? 'bg-emerald-950/50 border-emerald-400 ring-1 ring-emerald-400' 
                   : 'bg-slate-950 border-slate-800'
@@ -274,7 +273,7 @@ export default function KeypadSimulator() {
             
             <div 
               onClick={() => setActiveInput('command')}
-              className={`p-2 rounded-xl border transition ${
+              className={`p-2 rounded-xl border transition cursor-pointer ${
                 activeInput === 'command' 
                   ? 'bg-emerald-950/50 border-emerald-400 ring-1 ring-emerald-400' 
                   : 'bg-slate-950 border-slate-800'
@@ -303,7 +302,6 @@ export default function KeypadSimulator() {
             <Send className="w-3.5 h-3.5" /> Send
           </button>
 
-          {/* D-Pad Center Button */}
           <button
             onClick={handleSendSms}
             disabled={loading}
