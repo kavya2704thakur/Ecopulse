@@ -7,7 +7,6 @@ import org.springframework.web.client.RestTemplate;
 
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
-import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -42,7 +41,7 @@ public class LiveAirQualityFetchService {
             double longitude = ((Number) firstResult.get("longitude")).doubleValue();
             String officialCityName = (String) firstResult.get("name");
 
-            // 2. Real-time live Air Quality mangwate hain (Locale.US lagaya hai taaki dot decimal use ho)
+            // 2. Real-time live Air Quality mangwate hain
             String airUrl = String.format(
                     Locale.US,
                     "https://air-quality-api.open-meteo.com/v1/air-quality?latitude=%.4f&longitude=%.4f&current=european_aqi,pm10,pm2_5,carbon_monoxide",
@@ -60,7 +59,7 @@ public class LiveAirQualityFetchService {
             Map<?, ?> weatherResponse = restTemplate.getForObject(weatherUrl, Map.class);
             Map<?, ?> currentWeather = weatherResponse != null ? (Map<?, ?>) weatherResponse.get("current") : null;
 
-            // Values extract karte hain (safe fallbacks ke sath)
+            // Values extract karte hain
             int aqi = 110;
             double pm25 = 45.0;
             double pm10 = 85.0;
@@ -86,34 +85,16 @@ public class LiveAirQualityFetchService {
                 temp = ((Number) currentWeather.get("temperature_2m")).doubleValue();
             }
 
-            // Categorize Status & Advisory
-            String status;
-            String advisory;
-            if (aqi <= 50) {
-                status = "Good";
-                advisory = "Air quality is satisfactory. Outdoor activities are safe.";
-            } else if (aqi <= 100) {
-                status = "Moderate";
-                advisory = "Air quality is acceptable. Sensitive individuals should consider wearing a mask.";
-            } else if (aqi <= 200) {
-                status = "Poor";
-                advisory = "Air quality is unhealthy for sensitive groups. Reduce strenuous outdoor exertion.";
-            } else {
-                status = "Severe";
-                advisory = "Health alert: Serious risk of respiratory strain. Wear N95 masks and stay indoors.";
-            }
-
-            // Database entity populate karte hain
-            AirQuality record = new AirQuality();
-            record.setCity(officialCityName != null ? officialCityName : cityName);
-            record.setAqi(aqi);
-            record.setPm25(pm25);
-            record.setPm10(pm10);
-            record.setCo(co);
-            record.setTemperature(temp);
-            record.setStatus(status);
-            record.setAdvisory(advisory);
-            record.setRecordedAt(LocalDateTime.now());
+            // AirQuality entity ka parameterized constructor call karte hain
+            // Yeh constructor status, advisory aur recordedAt sab khud set karta hai
+            AirQuality record = new AirQuality(
+                    officialCityName != null ? officialCityName : cityName,
+                    aqi,
+                    pm25,
+                    pm10,
+                    co,
+                    temp
+            );
 
             return airQualityService.saveRecord(record);
 
