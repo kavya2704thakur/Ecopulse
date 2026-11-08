@@ -56,8 +56,8 @@ public class KeypadSmsService {
         return "EcoPulse Help: Send 'JOIN <CITY> <CONDITION>' to subscribe or 'STOP' to cancel alerts.";
     }
 
-    // Har subah 6:30 AM par sabhi keypad users ko SMS send karne ka Cron Scheduler
-    @Scheduled(cron = "0 30 6 * * ?")
+    // Har subah theek 6:30 AM IST par sabhi keypad users ko SMS send karne ka Cron Scheduler
+    @Scheduled(cron = "0 30 6 * * ?", zone = "Asia/Kolkata")
     public void sendMorningSmsAlerts() {
         List<KeypadUser> users = keypadUserRepository.findAll();
         for (KeypadUser user : users) {
