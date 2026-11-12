@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { 
   Wind, Thermometer, ShieldAlert, RefreshCw, MapPin, Activity, 
-  User, Bell, X, HeartPulse, Download, CheckCircle2, BellRing, Navigation, Leaf, Sparkles, ArrowRight, ShieldCheck, Flame, Droplets, Gauge,
+  User, Bell, X, HeartPulse, Download, CheckCircle2, BellRing, Navigation, Leaf, ArrowRight, ShieldCheck, Flame, Droplets,
   Users, Smartphone, Radio
 } from 'lucide-react';
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
@@ -11,16 +11,24 @@ import KeypadSimulator from './KeypadSimulator';
 // Dynamic API Base URL (Fallback to Render Live Backend)
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://ecopulse-backend-j2sh.onrender.com';
 
+// Web Push VAPID Public Key
+const VAPID_PUBLIC_KEY = "BIMv_MgooqWb6Fas2bJdX45INUS0KE_61PaYtbkvyiHE17Ylgls4Twu0ahTk9TydXoxeZhU2oWxCL1hthC58nmA";
+
+function urlBase64ToUint8Array(base64String) {
+  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const rawData = window.atob(base64);
+  return Uint8Array.from([...rawData].map((char) => char.charCodeAt(0)));
+}
+
 // High-Tech Cyber-Atmosphere Dynamic Background
 function CyberAtmosphereBackground() {
   return (
     <div className="fixed inset-0 pointer-events-none overflow-hidden z-0">
-      {/* Multi-spectrum Neon Auroras */}
       <div className="absolute -top-40 -left-20 w-[650px] h-[650px] bg-cyan-500/15 rounded-full blur-[140px] animate-pulse-cyan" />
       <div className="absolute top-1/4 -right-40 w-[600px] h-[600px] bg-indigo-600/15 rounded-full blur-[160px] animate-pulse-purple" />
       <div className="absolute -bottom-40 left-1/3 w-[700px] h-[700px] bg-emerald-500/15 rounded-full blur-[150px] animate-pulse-cyan" />
 
-      {/* Cyber Mesh Grid Overlay */}
       <svg className="absolute inset-0 w-full h-full opacity-[0.05]" xmlns="http://www.w3.org/2000/svg">
         <defs>
           <pattern id="cyber-grid" width="48" height="48" patternUnits="userSpaceOnUse">
@@ -31,7 +39,6 @@ function CyberAtmosphereBackground() {
         <rect width="100%" height="100%" fill="url(#cyber-grid)" />
       </svg>
 
-      {/* Floating Luminescent Biospores */}
       <div className="absolute top-1/4 left-1/6 w-2.5 h-2.5 bg-cyan-400/50 rounded-full blur-[2px] animate-float" style={{ animationDelay: '0s' }} />
       <div className="absolute top-2/3 left-1/4 w-3.5 h-3.5 bg-emerald-400/40 rounded-full blur-[2px] animate-float" style={{ animationDelay: '2.5s' }} />
       <div className="absolute top-1/2 right-1/4 w-3 h-3 bg-indigo-400/50 rounded-full blur-[2px] animate-float" style={{ animationDelay: '4s' }} />
@@ -66,6 +73,9 @@ function App() {
   const [deferredPrompt, setDeferredPrompt] = useState(null);
   const [notificationPermission, setNotificationPermission] = useState(
     typeof Notification !== 'undefined' ? Notification.permission : 'default'
+  );
+  const [isPushSubscribed, setIsPushSubscribed] = useState(
+    () => localStorage.getItem('ecopulse_push_subscribed') === 'true'
   );
 
   const [profileForm, setProfileForm] = useState({
@@ -117,6 +127,40 @@ function App() {
     return latestData?.advisory;
   };
 
+  // Register Service Worker & Subscribe Device to Backend Web Push
+  const registerBackgroundPush = async (targetCity, targetCondition) => {
+    try {
+      if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+        console.warn('Push messaging is not supported in this browser.');
+        return false;
+      }
+
+      const registration = await navigator.serviceWorker.register('/sw.js');
+      await navigator.serviceWorker.ready;
+
+      let subscription = await registration.pushManager.getSubscription();
+      if (!subscription) {
+        subscription = await registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+        });
+      }
+
+      await axios.post(`${API_BASE_URL}/api/notifications/subscribe`, {
+        subscription: JSON.stringify(subscription),
+        city: targetCity || userProfile?.city || 'Bhopal',
+        condition: (targetCondition || userProfile?.condition || 'NONE').toUpperCase()
+      });
+
+      localStorage.setItem('ecopulse_push_subscribed', 'true');
+      setIsPushSubscribed(true);
+      return true;
+    } catch (err) {
+      console.error('Background Push Subscription Error:', err);
+      return false;
+    }
+  };
+
   const sendSystemNotification = (data) => {
     if (Notification.permission === 'granted') {
       const condition = userProfile?.condition || 'General';
@@ -129,13 +173,35 @@ function App() {
     }
   };
 
-  const requestNotificationAccess = async () => {
+  const requestNotificationAccess = async (customCity, customCondition) => {
     if ('Notification' in window) {
       const perm = await Notification.requestPermission();
       setNotificationPermission(perm);
-      if (perm === 'granted' && latestData) {
-        sendSystemNotification(latestData);
+
+      if (perm === 'granted') {
+        const subOk = await registerBackgroundPush(
+          customCity || city || userProfile?.city,
+          customCondition || userProfile?.condition
+        );
+        if (latestData) {
+          sendSystemNotification(latestData);
+        }
+        if (subOk) {
+          alert('✅ Background 6:30 AM Alerts Enabled! Ab website band rehne par bhi roz subah 6:30 AM notification aayega.');
+        }
+      } else {
+        alert('Browser settings se Notifications allow karein taaki 6:30 AM alerts aa sakein.');
       }
+    }
+  };
+
+  // Trigger Backend Server Push Test (Real Service Worker Push Test)
+  const triggerServerPushTest = async () => {
+    try {
+      await axios.post(`${API_BASE_URL}/api/notifications/test-trigger`);
+      alert('Server Push Triggered! Agar subscription active hai toh kuch seconds mein background notification aayega.');
+    } catch (err) {
+      if (latestData) sendSystemNotification(latestData);
     }
   };
 
@@ -149,7 +215,6 @@ function App() {
         keypad: res.data.keypadUsers
       });
     } catch {
-      // Fallback calculation agar backend stats endpoint deploy/update na ho
       setSubscriberStats((prev) => ({
         total: prev.web + prev.keypad,
         web: 142,
@@ -237,6 +302,11 @@ function App() {
       resolveCurrentLocationAndFetch(false);
       fetchSubscriberStats();
       setShowMorningPopup(true);
+
+      // Re-sync push subscription with updated city/condition if permission already granted
+      if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+        registerBackgroundPush(userProfile.city, userProfile.condition);
+      }
     } else {
       setLoading(false);
     }
@@ -252,19 +322,6 @@ function App() {
     return () => clearInterval(interval);
   }, [city, userProfile]);
 
-  useEffect(() => {
-    if (!userProfile) return;
-    const checkSchedule = () => {
-      const now = new Date();
-      if (now.getHours() === 6 && now.getMinutes() === 30 && now.getSeconds() < 10) {
-        resolveCurrentLocationAndFetch(true);
-      }
-    };
-
-    const timer = setInterval(checkSchedule, 10000);
-    return () => clearInterval(timer);
-  }, [userProfile]);
-
   const handleSearch = (e) => {
     e.preventDefault();
     if (searchCity.trim()) {
@@ -275,16 +332,16 @@ function App() {
     }
   };
 
-  const handleSaveProfile = (e) => {
+  const handleSaveProfile = async (e) => {
     e.preventDefault();
     localStorage.setItem('ecopulse_user', JSON.stringify(profileForm));
     setUserProfile(profileForm);
     setIsProfileModalOpen(false);
     setLoading(true);
-    fetchAqiData(profileForm.city);
+    await fetchAqiData(profileForm.city);
     fetchSubscriberStats();
     setShowMorningPopup(true);
-    requestNotificationAccess();
+    await requestNotificationAccess(profileForm.city, profileForm.condition);
   };
 
   const handleLogout = () => {
@@ -429,15 +486,19 @@ function App() {
             </button>
 
             <button
-              onClick={requestNotificationAccess}
+              onClick={() => requestNotificationAccess()}
               className={`flex items-center gap-1.5 px-3.5 py-2 border rounded-xl text-xs font-semibold transition active:scale-95 cursor-pointer shadow-sm ${
-                notificationPermission === 'granted'
-                  ? 'bg-slate-900/80 border-slate-700 text-slate-300'
+                notificationPermission === 'granted' && isPushSubscribed
+                  ? 'bg-emerald-950/60 border-emerald-500/40 text-emerald-300'
                   : 'bg-amber-500/10 border-amber-500/40 text-amber-300 animate-pulse'
               }`}
             >
               <BellRing className="w-4 h-4 text-amber-400" />
-              <span>{notificationPermission === 'granted' ? '6:30 AM Alert: Active' : 'Enable 6:30 AM Alert'}</span>
+              <span>
+                {notificationPermission === 'granted' && isPushSubscribed
+                  ? '6:30 AM Push: Active'
+                  : 'Enable 6:30 AM Alert'}
+              </span>
             </button>
 
             <button
@@ -484,10 +545,8 @@ function App() {
           </div>
         </header>
 
-        {/* LIVE USER SUBSCRIBER TELEMETRY HUD (PWA vs KEYPAD BREAKDOWN) */}
+        {/* LIVE USER SUBSCRIBER TELEMETRY HUD */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          
-          {/* Total Registered Subscribers */}
           <div className="bg-gradient-to-br from-slate-900/80 to-slate-950/80 backdrop-blur-xl border border-cyan-500/30 p-4.5 rounded-2xl flex items-center justify-between shadow-lg shadow-cyan-950/20">
             <div>
               <div className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Total Active Subscribers</div>
@@ -499,7 +558,6 @@ function App() {
             </div>
           </div>
 
-          {/* Smartphone Web PWA Users */}
           <div className="bg-gradient-to-br from-slate-900/80 to-slate-950/80 backdrop-blur-xl border border-teal-500/30 p-4.5 rounded-2xl flex items-center justify-between shadow-lg shadow-teal-950/20">
             <div>
               <div className="text-[10px] uppercase font-bold text-teal-400 tracking-wider">Smartphone Web PWA</div>
@@ -511,7 +569,6 @@ function App() {
             </div>
           </div>
 
-          {/* 2G Keypad / Feature Phone Subscribers */}
           <div className="bg-gradient-to-br from-slate-900/80 to-slate-950/80 backdrop-blur-xl border border-emerald-500/30 p-4.5 rounded-2xl flex items-center justify-between shadow-lg shadow-emerald-950/20">
             <div>
               <div className="text-[10px] uppercase font-bold text-emerald-400 tracking-wider">Offline 2G Keypad GSM</div>
@@ -522,7 +579,6 @@ function App() {
               <Radio className="w-5 h-5 animate-pulse" />
             </div>
           </div>
-
         </div>
 
         {loading ? (
@@ -536,11 +592,8 @@ function App() {
           </div>
         ) : latestData ? (
           <main className="space-y-6">
-            
-            {/* HERO CARD: Vibrant Cyber AQI Monolith */}
+            {/* HERO CARD */}
             <div className="relative overflow-hidden bg-gradient-to-br from-slate-900/80 via-slate-900/50 to-cyan-950/30 backdrop-blur-2xl border border-cyan-500/30 p-8 rounded-[32px] shadow-[0_20px_60px_rgba(0,0,0,0.7)] flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
-              
-              {/* Internal Accent Glow */}
               <div className="absolute top-0 right-1/3 w-64 h-64 bg-cyan-500/10 rounded-full blur-3xl pointer-events-none" />
 
               <div className="space-y-1.5 relative z-10">
@@ -585,8 +638,6 @@ function App() {
 
             {/* 4 MULTI-COLOR METRIC TILES */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-              
-              {/* PM2.5 Tile - Cyan Glow */}
               <div className="bg-gradient-to-br from-slate-900/80 to-slate-950/80 backdrop-blur-xl border border-cyan-500/30 hover:border-cyan-400 p-5 rounded-2xl shadow-lg transition duration-300 group">
                 <div className="flex justify-between items-center text-xs font-bold text-cyan-400 uppercase tracking-wider">
                   <span>PM 2.5</span>
@@ -598,7 +649,6 @@ function App() {
                 <div className="text-[10px] text-slate-500 mt-1 font-mono">Fine inhalable particles</div>
               </div>
 
-              {/* PM10 Tile - Emerald Glow */}
               <div className="bg-gradient-to-br from-slate-900/80 to-slate-950/80 backdrop-blur-xl border border-emerald-500/30 hover:border-emerald-400 p-5 rounded-2xl shadow-lg transition duration-300 group">
                 <div className="flex justify-between items-center text-xs font-bold text-emerald-400 uppercase tracking-wider">
                   <span>PM 10</span>
@@ -610,7 +660,6 @@ function App() {
                 <div className="text-[10px] text-slate-500 mt-1 font-mono">Coarse airborne dust</div>
               </div>
 
-              {/* CO Tile - Amber/Orange Glow */}
               <div className="bg-gradient-to-br from-slate-900/80 to-slate-950/80 backdrop-blur-xl border border-amber-500/30 hover:border-amber-400 p-5 rounded-2xl shadow-lg transition duration-300 group">
                 <div className="flex justify-between items-center text-xs font-bold text-amber-400 uppercase tracking-wider">
                   <span>CO Density</span>
@@ -622,7 +671,6 @@ function App() {
                 <div className="text-[10px] text-slate-500 mt-1 font-mono">Carbon Monoxide gas</div>
               </div>
 
-              {/* Temp Tile - Rose/Orange Glow */}
               <div className="bg-gradient-to-br from-slate-900/80 to-slate-950/80 backdrop-blur-xl border border-rose-500/30 hover:border-rose-400 p-5 rounded-2xl shadow-lg transition duration-300 group">
                 <div className="flex justify-between items-center text-xs font-bold text-rose-400 uppercase tracking-wider">
                   <span>Thermal Index</span>
@@ -633,7 +681,6 @@ function App() {
                 </div>
                 <div className="text-[10px] text-slate-500 mt-1 font-mono">Ambient Temperature</div>
               </div>
-
             </div>
 
             {/* LIVE AQI TELEMETRY GRAPH */}
@@ -678,7 +725,6 @@ function App() {
 
             {/* RETRO NOKIA GSM SIMULATOR */}
             <KeypadSimulator />
-
           </main>
         ) : null}
 
@@ -734,10 +780,10 @@ function App() {
 
               <div className="flex gap-2.5">
                 <button
-                  onClick={() => sendSystemNotification(latestData)}
+                  onClick={triggerServerPushTest}
                   className="flex-1 py-3 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded-xl transition cursor-pointer border border-slate-700"
                 >
-                  Test System Push
+                  Test Background Push
                 </button>
                 <button
                   onClick={() => setShowMorningPopup(false)}
